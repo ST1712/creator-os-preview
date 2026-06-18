@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Creator OS Preview v5 (auto-login)</title>
+<title>Creator OS Preview v6</title>
 <!-- RENDER-CRITICAL LIBRARIES: multi-CDN fallback chain (2026-05-29 P0 fix).
      These three (React, ReactDOM, Babel-standalone) MUST load or the app is a blank
      screen. They used to load ONLY from unpkg.com, which is blocked/throttled on many
@@ -50232,7 +50232,31 @@ function CreatorDNA({
   creator
 }) {
   const handle = creator && creator.handle ? "@" + String(creator.handle).replace(/^@/, "") : "@anushkarathod98";
-  const d = creator && creator.dna || null; // live per-creator DNA; falls back to the demo dossier
+  const d = creator && creator.dna || null; // live per-creator DNA, built from real content only
+  if (!d) return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      letterSpacing: ".2em",
+      textTransform: "uppercase",
+      color: COS.ac,
+      fontWeight: 700
+    }
+  }, "Your Creator DNA"), /*#__PURE__*/React.createElement("h1", {
+    style: {
+      fontFamily: COS.disp,
+      fontWeight: 800,
+      fontSize: 30,
+      letterSpacing: "-.03em",
+      margin: "12px 0 6px"
+    }
+  }, "We're building your DNA."), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: COS.mut,
+      fontSize: 14.5,
+      lineHeight: 1.6,
+      maxWidth: 560
+    }
+  }, "Your DNA is read from your real content, never guessed. Connect your Instagram and we build it from your actual posts and audience."), /*#__PURE__*/React.createElement(ConnectInstagram, null));
   const card = (title, body, opts) => {
     opts = opts || {};
     return /*#__PURE__*/React.createElement("div", {
@@ -51332,7 +51356,11 @@ function cosTemplateScript(brand, hook) {
 function CreatorStudio({
   creator
 }) {
-  const [brands, setBrands] = React.useState([]);
+  const [matches, setMatches] = React.useState(null); // null=loading | [] | rows
+  const [matchBusy, setMatchBusy] = React.useState(false);
+  const [brandsFallback, setBrandsFallback] = React.useState([]);
+  const [q, setQ] = React.useState("");
+  const [catFilter, setCatFilter] = React.useState("");
   const [brand, setBrand] = React.useState("");
   const [seed, setSeed] = React.useState("");
   const [script, setScript] = React.useState(null);
@@ -51343,14 +51371,18 @@ function CreatorStudio({
   const [ideasBusy, setIdeasBusy] = React.useState(false);
   React.useEffect(() => {
     const sb = cosGetSb();
-    if (!sb) return;
+    if (!sb) {
+      setMatches([]);
+      return;
+    }
+    let cancel = false;
     (async () => {
       try {
         const {
           data
         } = await sb.from("public_directory").select("company,type");
-        const seen = {};
-        const out = [];
+        const seen = {},
+          out = [];
         (data || []).forEach(r => {
           if (r.type === "brand" && !seen[r.company]) {
             seen[r.company] = 1;
@@ -51358,10 +51390,40 @@ function CreatorStudio({
           }
         });
         out.sort();
-        setBrands(out);
+        if (!cancel) setBrandsFallback(out);
       } catch (_) {}
+      if (!creator || !creator.id) {
+        if (!cancel) setMatches([]);
+        return;
+      }
+      const cols = "brand_name,category,sub_vertical,fit_score,tier,why_fits,angle,contact_ready";
+      try {
+        let r = await sb.from("creator_brand_matches").select(cols).eq("creator_id", creator.id).order("fit_score", {
+          ascending: false
+        });
+        if (!cancel && (!r.data || !r.data.length) && creator.dna) {
+          setMatchBusy(true);
+          try {
+            await sb.functions.invoke("match-brands", {
+              body: {
+                creator_id: creator.id
+              }
+            });
+          } catch (_) {}
+          r = await sb.from("creator_brand_matches").select(cols).eq("creator_id", creator.id).order("fit_score", {
+            ascending: false
+          });
+          if (!cancel) setMatchBusy(false);
+        }
+        if (!cancel) setMatches(r && r.data || []);
+      } catch (_) {
+        if (!cancel) setMatches([]);
+      }
     })();
-  }, []);
+    return () => {
+      cancel = true;
+    };
+  }, [creator]);
   const ideasFor = b => b ? ["The money you are quietly losing on " + b + " every month", "I put " + b + " to the test for 30 days. Here is the honest math.", "3 things to check before you use " + b, "Salaried and using " + b + "? Do this one thing today."] : [];
   // Real, DNA-aware ideas from the engine; falls back to starter hooks if DNA isn't built yet.
   React.useEffect(() => {
@@ -51490,6 +51552,25 @@ function CreatorStudio({
       margin: "12px 0 5px"
     }
   }, t);
+  const chip = on => ({
+    background: on ? COS.ac : "transparent",
+    color: on ? "#06120f" : COS.mut,
+    border: "1px solid " + (on ? COS.ac : COS.line2),
+    borderRadius: 8,
+    padding: "7px 12px",
+    fontFamily: COS.body,
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer"
+  });
+  const tierColor = t => t === "core" ? COS.ac : t === "stretch" ? COS.amber : COS.mut;
+  const cats = [];
+  (matches || []).forEach(m => {
+    if (m.category && cats.indexOf(m.category) < 0) cats.push(m.category);
+  });
+  const ql = q.trim().toLowerCase();
+  const shown = (matches || []).filter(m => (!catFilter || m.category === catFilter) && (!ql || String(m.brand_name).toLowerCase().indexOf(ql) >= 0));
+  const selected = (matches || []).find(m => m.brand_name === brand);
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
@@ -51498,7 +51579,7 @@ function CreatorStudio({
       color: COS.ac,
       fontWeight: 700
     }
-  }, "Studio \xB7 ideas & scripts"), /*#__PURE__*/React.createElement("h1", {
+  }, "Studio"), /*#__PURE__*/React.createElement("h1", {
     style: {
       fontFamily: COS.disp,
       fontWeight: 800,
@@ -51506,43 +51587,263 @@ function CreatorStudio({
       letterSpacing: "-.03em",
       margin: "12px 0 4px"
     }
-  }, "Turn any brand into a ready-to-shoot reel."), /*#__PURE__*/React.createElement("p", {
+  }, "Brands that fit you, into ready-to-shoot reels."), /*#__PURE__*/React.createElement("p", {
     style: {
       color: COS.mut,
       fontSize: 14.5,
-      margin: "0 0 16px",
-      maxWidth: 560,
+      margin: "0 0 18px",
+      maxWidth: 580,
       lineHeight: 1.55
     }
-  }, "Ideas tuned to your DNA and the brand you pick. Bring your own hook, drop the brief, get a script in your voice."), /*#__PURE__*/React.createElement("select", {
-    value: brand,
-    onChange: e => {
-      setBrand(e.target.value);
+  }, "Ranked against your DNA. Pick one, get ideas in your voice, drop the brand's brief, walk away with a script."), matches === null || matchBusy ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: COS.mut,
+      fontSize: 14,
+      padding: "20px 0"
+    }
+  }, "Matching brands to your DNA\u2026") : matches.length ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap",
+      alignItems: "center",
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: q,
+    onChange: e => setQ(e.target.value),
+    placeholder: "Search brands\u2026",
+    style: {
+      ...fs,
+      maxWidth: 220
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setCatFilter(""),
+    style: chip(catFilter === "")
+  }, "All"), cats.map(c => /*#__PURE__*/React.createElement("button", {
+    key: c,
+    onClick: () => setCatFilter(c),
+    style: chip(catFilter === c)
+  }, c))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))",
+      gap: 11
+    }
+  }, shown.map((m, i) => /*#__PURE__*/React.createElement("button", {
+    key: i,
+    onClick: () => {
+      setBrand(m.brand_name);
+      setScript(null);
+      setTimeout(() => {
+        try {
+          window.scrollTo({
+            top: document.body.scrollHeight,
+            behavior: "smooth"
+          });
+        } catch (_) {}
+      }, 50);
+    },
+    style: {
+      textAlign: "left",
+      background: brand === m.brand_name ? "linear-gradient(150deg,rgba(26,222,212,.14),rgba(245,166,35,.05))" : COS.panel,
+      border: "1px solid " + (brand === m.brand_name ? "rgba(26,222,212,.5)" : COS.line),
+      borderRadius: 13,
+      padding: 14,
+      cursor: "pointer",
+      color: COS.ink,
+      fontFamily: COS.body
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      fontSize: 15
+    }
+  }, m.brand_name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: COS.disp,
+      fontWeight: 800,
+      fontSize: 17,
+      color: tierColor(m.tier)
+    }
+  }, m.fit_score)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: COS.mut,
+      textTransform: "uppercase",
+      letterSpacing: ".05em",
+      marginTop: 3
+    }
+  }, m.category, m.tier ? " · " + m.tier : ""), m.why_fits ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: COS.mut,
+      marginTop: 8,
+      lineHeight: 1.45
+    }
+  }, m.why_fits) : null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 10
+    }
+  }, m.contact_ready ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9.5,
+      fontWeight: 700,
+      color: "#06120f",
+      background: COS.ac,
+      borderRadius: 5,
+      padding: "2px 7px"
+    }
+  }, "\u2713 Contact ready") : /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9.5,
+      color: COS.mut,
+      border: "1px solid " + COS.line2,
+      borderRadius: 5,
+      padding: "2px 7px"
+    }
+  }, "We find the contact")))))) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: COS.panel,
+      border: "1px solid " + COS.line,
+      borderRadius: 14,
+      padding: 18
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      color: COS.ink,
+      fontWeight: 700
+    }
+  }, "Build your Creator DNA to unlock brands matched to you."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: COS.mut,
+      margin: "6px 0 12px"
+    }
+  }, "Until then, pick any brand to start a script."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 7,
+      flexWrap: "wrap"
+    }
+  }, brandsFallback.slice(0, 30).map(b => /*#__PURE__*/React.createElement("button", {
+    key: b,
+    onClick: () => {
+      setBrand(b);
+      setScript(null);
+    },
+    style: chip(brand === b)
+  }, b)))), brand ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 26
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: 10,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      letterSpacing: ".12em",
+      textTransform: "uppercase",
+      color: COS.ac,
+      fontWeight: 700
+    }
+  }, "Studio \xB7 ", brand), selected && selected.angle ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      color: COS.ink,
+      marginTop: 6,
+      maxWidth: 580,
+      lineHeight: 1.5
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: COS.mut
+    }
+  }, "Your angle: "), selected.angle) : null), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setBrand("");
       setScript(null);
     },
     style: {
-      ...fs,
-      maxWidth: 340
+      background: "transparent",
+      border: "1px solid " + COS.line2,
+      color: COS.mut,
+      borderRadius: 8,
+      padding: "7px 11px",
+      fontFamily: COS.body,
+      fontSize: 12,
+      cursor: "pointer"
     }
-  }, /*#__PURE__*/React.createElement("option", {
-    value: ""
-  }, "Choose a brand\u2026"), brands.map(b => /*#__PURE__*/React.createElement("option", {
-    key: b,
-    value: b
-  }, b))), brand ? /*#__PURE__*/React.createElement("div", {
+  }, "\u2190 Back to brands")), /*#__PURE__*/React.createElement("div", {
     style: {
-      marginTop: 22
+      marginTop: 14,
+      background: "linear-gradient(150deg,rgba(245,166,35,.08),rgba(26,222,212,.04))",
+      border: "1px solid " + COS.line2,
+      borderRadius: 13,
+      padding: 14
     }
   }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      color: COS.ink,
+      fontWeight: 700
+    }
+  }, "Have the brand's brief?"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: COS.mut,
+      margin: "4px 0 10px",
+      maxWidth: 540
+    }
+  }, "Drop it and every script hits the mandatories, written in your voice, the way the brand team wants it."), /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: "inline-block",
+      fontFamily: COS.body,
+      fontSize: 12.5,
+      color: COS.ink,
+      border: "1px dashed " + COS.line2,
+      borderRadius: 10,
+      padding: "10px 14px",
+      cursor: "pointer"
+    }
+  }, "\u2191 Upload brief (TXT / DOCX)", /*#__PURE__*/React.createElement("input", {
+    type: "file",
+    accept: ".txt,.md,.docx,.doc",
+    style: {
+      display: "none"
+    },
+    onChange: e => loadBrief(e.target)
+  })), briefName ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 10,
+      fontFamily: COS.body,
+      fontSize: 12,
+      color: COS.ac
+    }
+  }, "\u2713 ", briefName, " attached, scripts are brief-aware") : null), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       letterSpacing: ".12em",
       textTransform: "uppercase",
       color: COS.mut,
       fontWeight: 700,
-      marginBottom: 9
+      margin: "20px 0 9px"
     }
-  }, "Idea suggestions, on your DNA"), ideasBusy ? /*#__PURE__*/React.createElement("div", {
+  }, "Idea suggestions, on your DNA", briefName ? " + brief" : ""), ideasBusy ? /*#__PURE__*/React.createElement("div", {
     style: {
       color: COS.mut,
       fontSize: 13,
@@ -51629,36 +51930,7 @@ function CreatorStudio({
       fontSize: 14,
       cursor: "pointer"
     }
-  }, "Write the script \u2192")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 14
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: "inline-block",
-      fontFamily: COS.body,
-      fontSize: 12.5,
-      color: COS.ink,
-      border: "1px dashed " + COS.line2,
-      borderRadius: 10,
-      padding: "10px 14px",
-      cursor: "pointer"
-    }
-  }, "\u2191 Upload brief (TXT / DOCX)", /*#__PURE__*/React.createElement("input", {
-    type: "file",
-    accept: ".txt,.md,.docx,.doc",
-    style: {
-      display: "none"
-    },
-    onChange: e => loadBrief(e.target)
-  })), briefName ? /*#__PURE__*/React.createElement("span", {
-    style: {
-      marginLeft: 10,
-      fontFamily: COS.body,
-      fontSize: 12,
-      color: COS.ac
-    }
-  }, "\u2713 ", briefName, " attached") : null), busy ? /*#__PURE__*/React.createElement("div", {
+  }, "Write the script \u2192")), busy ? /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 18,
       color: COS.mut,
