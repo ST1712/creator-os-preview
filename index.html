@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Social Tweebs | Creative Command Center</title>
+<title>Creator OS Preview v3</title>
 <!-- RENDER-CRITICAL LIBRARIES: multi-CDN fallback chain (2026-05-29 P0 fix).
      These three (React, ReactDOM, Babel-standalone) MUST load or the app is a blank
      screen. They used to load ONLY from unpkg.com, which is blocked/throttled on many
@@ -53277,10 +53277,10 @@ function RootRouter() {
   if (role === "creator") return /*#__PURE__*/React.createElement(CreatorAuth, null, /*#__PURE__*/React.createElement(CreatorOSApp, {
     onSwitch: clear
   }));
-  if (role === "brand" || role === "agency") return /*#__PURE__*/React.createElement(App, null);
-  return /*#__PURE__*/React.createElement(RoleGate, {
-    onPick: pick
-  });
+  /* preview: forced creator */
+  return /*#__PURE__*/React.createElement(CreatorAuth, null, /*#__PURE__*/React.createElement(CreatorOSApp, {
+    onSwitch: clear
+  }));
 }
 
 // Route ?share=TOKEN to the read-only viewer; otherwise render the normal app.
