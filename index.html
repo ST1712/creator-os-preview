@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Creator OS Preview v3</title>
+<title>Creator OS Preview v4</title>
 <!-- RENDER-CRITICAL LIBRARIES: multi-CDN fallback chain (2026-05-29 P0 fix).
      These three (React, ReactDOM, Babel-standalone) MUST load or the app is a blank
      screen. They used to load ONLY from unpkg.com, which is blocked/throttled on many
@@ -51026,7 +51026,8 @@ function CreatorAuth({
   const [note, setNote] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   React.useEffect(() => {
-    let tries = 0;
+    let tries = 0,
+      authSub = null;
     const t = setInterval(async () => {
       const sb = cosGetSb();
       tries++;
@@ -51041,16 +51042,22 @@ function CreatorAuth({
           setPhase("out");
         }
         try {
-          sb.auth.onAuthStateChange((_e, s) => {
+          const r = sb.auth.onAuthStateChange((_e, s) => {
             if (s && s.user) setPhase("in");
           });
+          authSub = r && r.data && r.data.subscription;
         } catch (_) {}
       } else if (tries > 40) {
         clearInterval(t);
         setPhase("out");
       }
     }, 150);
-    return () => clearInterval(t);
+    return () => {
+      clearInterval(t);
+      try {
+        if (authSub) authSub.unsubscribe();
+      } catch (_) {}
+    };
   }, []);
   const sbc = () => cosGetSb();
   const signinPw = async () => {
@@ -51994,43 +52001,28 @@ function CreatorToday({
       });
       return;
     }
+    let cancel = false;
     (async () => {
-      let ideas = 0,
-        recent = [],
-        ready = 0,
-        total = 0,
-        igUser = null;
-      try {
-        const r = await sb.from("creator_pitch_ideas").select("id", {
-          count: "exact",
-          head: true
-        }).eq("creator_id", creator.id);
-        ideas = r.count || 0;
-      } catch (_) {}
-      try {
-        const r = await sb.from("creator_pitch_ideas").select("brand_name,hook,created_at").eq("creator_id", creator.id).order("created_at", {
-          ascending: false
-        }).limit(3);
-        recent = r.data || [];
-      } catch (_) {}
-      try {
-        const r = await sb.from("public_directory").select("has_contact,type").eq("type", "brand");
-        const rows = r.data || [];
-        total = rows.length;
-        ready = rows.filter(x => x.has_contact).length;
-      } catch (_) {}
-      try {
-        const r = await sb.from("creators").select("ig_username").eq("id", creator.id).limit(1);
-        igUser = r.data && r.data[0] && r.data[0].ig_username || null;
-      } catch (_) {}
+      const q = p => p.then(r => r || {}).catch(() => ({}));
+      const [ideasR, recentR, dirR, igR] = await Promise.all([q(sb.from("creator_pitch_ideas").select("id", {
+        count: "exact",
+        head: true
+      }).eq("creator_id", creator.id)), q(sb.from("creator_pitch_ideas").select("brand_name,hook,created_at").eq("creator_id", creator.id).order("created_at", {
+        ascending: false
+      }).limit(3)), q(sb.from("public_directory").select("has_contact,type").eq("type", "brand")), q(sb.from("creators").select("ig_username").eq("id", creator.id).limit(1))]);
+      if (cancel) return;
+      const rows = dirR.data || [];
       setStats({
-        ideas,
-        ready,
-        total,
-        igUser,
-        recent
+        ideas: ideasR.count || 0,
+        recent: recentR.data || [],
+        total: rows.length,
+        ready: rows.filter(x => x.has_contact).length,
+        igUser: igR.data && igR.data[0] && igR.data[0].ig_username || null
       });
     })();
+    return () => {
+      cancel = true;
+    };
   }, [creator]);
   if (showDna) return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowDna(false),
@@ -52311,6 +52303,25 @@ function CreatorBroadcast({
     load();
   }, [load]);
   const subs = (list || []).filter(r => r.subscribed !== false);
+
+  // Make Excel upload reliable: use a loaded SheetJS, else fetch it once from a CDN, else CSV only.
+  const ensureXLSX = () => new Promise(res => {
+    if (window.XLSX) return res(true);
+    try {
+      if (window.__ensureExportLibs) window.__ensureExportLibs();
+    } catch (_) {}
+    if (window.XLSX) return res(true);
+    try {
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+      s.onload = () => res(!!window.XLSX);
+      s.onerror = () => res(false);
+      document.head.appendChild(s);
+      setTimeout(() => res(!!window.XLSX), 6000);
+    } catch (_) {
+      res(false);
+    }
+  });
   const parseFile = async file => {
     const out = [];
     const seen = {};
@@ -52325,12 +52336,8 @@ function CreatorBroadcast({
     };
     try {
       if (/\.xlsx?$/i.test(file.name)) {
-        if (window.__ensureExportLibs) {
-          try {
-            window.__ensureExportLibs();
-          } catch (_) {}
-        }
-        if (window.XLSX) {
+        const _ok = await ensureXLSX();
+        if (_ok && window.XLSX) {
           const ab = await file.arrayBuffer();
           const wb = window.XLSX.read(ab, {
             type: "array"
@@ -53256,6 +53263,39 @@ function RootRouter() {
       return "";
     }
   });
+  // When no role is chosen yet, do NOT show the chooser to EXISTING signed-in users (the current
+  // Pitchkraft base) -- send them straight to the app they already know. Only brand-new, signed-out
+  // visitors see the gate. Keeps Pitchkraft's first run identical after the flag flip.
+  const [sess, setSess] = React.useState("checking"); // checking | yes | no
+  React.useEffect(() => {
+    if (!CREATOR_OS_ENABLED || role) {
+      return;
+    }
+    let done = false,
+      tries = 0;
+    const t = setInterval(async () => {
+      const sb = cosGetSb();
+      tries++;
+      if (sb) {
+        clearInterval(t);
+        try {
+          const {
+            data
+          } = await sb.auth.getSession();
+          if (!done) setSess(data && data.session && data.session.user ? "yes" : "no");
+        } catch (_) {
+          if (!done) setSess("no");
+        }
+      } else if (tries > 40) {
+        clearInterval(t);
+        if (!done) setSess("no");
+      }
+    }, 150);
+    return () => {
+      done = true;
+      clearInterval(t);
+    };
+  }, [role]);
   const pick = r => {
     try {
       localStorage.setItem("cos_role", r);
@@ -53274,13 +53314,23 @@ function RootRouter() {
   } catch (_) {}
   if (!CREATOR_OS_ENABLED) return /*#__PURE__*/React.createElement(App, null);
   if (isAdmin) return /*#__PURE__*/React.createElement(CreatorAuth, null, /*#__PURE__*/React.createElement(AdminDashboard, null));
-  if (role === "creator") return /*#__PURE__*/React.createElement(CreatorAuth, null, /*#__PURE__*/React.createElement(CreatorOSApp, {
+  if (true) return /*#__PURE__*/React.createElement(CreatorAuth, null, /*#__PURE__*/React.createElement(CreatorOSApp, {
     onSwitch: clear
   }));
-  /* preview: forced creator */
-  return /*#__PURE__*/React.createElement(CreatorAuth, null, /*#__PURE__*/React.createElement(CreatorOSApp, {
-    onSwitch: clear
-  }));
+  if (role === "brand" || role === "agency") return /*#__PURE__*/React.createElement(App, null);
+  if (sess === "checking") return /*#__PURE__*/React.createElement(CosShell, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      height: "100vh",
+      color: COS.mut
+    }
+  }, "Loading\u2026"));
+  if (sess === "yes") return /*#__PURE__*/React.createElement(App, null);
+  return /*#__PURE__*/React.createElement(RoleGate, {
+    onPick: pick
+  });
 }
 
 // Route ?share=TOKEN to the read-only viewer; otherwise render the normal app.
