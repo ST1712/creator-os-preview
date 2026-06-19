@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Creator OS Preview v9</title>
+<title>Creator OS Preview v10</title>
 <!-- RENDER-CRITICAL LIBRARIES: multi-CDN fallback chain (2026-05-29 P0 fix).
      These three (React, ReactDOM, Babel-standalone) MUST load or the app is a blank
      screen. They used to load ONLY from unpkg.com, which is blocked/throttled on many
@@ -50960,26 +50960,28 @@ function GenerateDNA({
   const handle = creator && creator.handle ? "@" + String(creator.handle).replace(/^@/, "") : "your account";
   const gen = async () => {
     setBusy(true);
-    setMsg("Reading your content and building your DNA, this takes a moment…");
+    setMsg("Reading your content, building your DNA, matching brands and planning your moves…");
     try {
       const sb = cosGetSb();
+      // one call ignites everything: DNA -> brand matches -> your moves this week
       const {
-        data,
-        error
-      } = await sb.functions.invoke("generate-creator-dna", {
+        data
+      } = await sb.functions.invoke("onboard-creator", {
         body: {
           creator_id: creator.id
         }
       });
-      if (!error && data && data.dna) {
-        onDone(data.dna);
-        return;
+      if (data && data.ready) {
+        const {
+          data: rows
+        } = await sb.from("creators").select("dna").eq("id", creator.id).limit(1);
+        const dna = rows && rows[0] && rows[0].dna;
+        if (dna) {
+          onDone(dna);
+          return;
+        }
       }
-      if (data && data.note) {
-        setMsg(data.note);
-      } else {
-        setMsg("Could not build your DNA yet. We may still be reading your content, try again shortly.");
-      }
+      setMsg(data && data.note || "We are still reading your content. Try again in a moment, or connect your Instagram below.");
     } catch (_) {
       setMsg("Something went wrong, try again in a moment.");
     }
@@ -53876,20 +53878,10 @@ function RootRouter() {
   if (true) return /*#__PURE__*/React.createElement(CreatorAuth, null, /*#__PURE__*/React.createElement(CreatorOSApp, {
     onSwitch: clear
   }));
-  if (role === "brand" || role === "agency") return /*#__PURE__*/React.createElement(App, null);
-  if (sess === "checking") return /*#__PURE__*/React.createElement(CosShell, null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      height: "100vh",
-      color: COS.mut
-    }
-  }, "Loading\u2026"));
-  if (sess === "yes") return /*#__PURE__*/React.createElement(App, null);
-  return /*#__PURE__*/React.createElement(RoleGate, {
-    onPick: pick
-  });
+  // Opt-in launch: the Command Center stays the DEFAULT for everyone. Creator OS is reached only via
+  // ?role=creator (or ?admin=1) -- existing users see zero change. To promote to a full role gate
+  // later, restore: return <RoleGate onPick={pick} />; (and the sess gate-skip above).
+  return /*#__PURE__*/React.createElement(App, null);
 }
 
 // Route ?share=TOKEN to the read-only viewer; otherwise render the normal app.
