@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Creator OS Preview v7</title>
+<title>Creator OS Preview v8</title>
 <!-- RENDER-CRITICAL LIBRARIES: multi-CDN fallback chain (2026-05-29 P0 fix).
      These three (React, ReactDOM, Babel-standalone) MUST load or the app is a blank
      screen. They used to load ONLY from unpkg.com, which is blocked/throttled on many
@@ -51997,6 +51997,9 @@ function CreatorPipeline({
   const [cls, setCls] = React.useState(3);
   const [targets, setTargets] = React.useState({});
   const [pending, setPending] = React.useState({});
+  const [drafts, setDrafts] = React.useState({});
+  const [draftBusy, setDraftBusy] = React.useState({});
+  const [openDraft, setOpenDraft] = React.useState("");
   React.useEffect(() => {
     const sb = cosGetSb();
     if (!sb) {
@@ -52022,13 +52025,32 @@ function CreatorPipeline({
     (async () => {
       try {
         const {
-          data
-        } = await sb.from("creator_relationships").select("counterparty_name").eq("creator_id", creator.id).eq("counterparty_type", "brand");
-        const t = {};
-        (data || []).forEach(r => {
-          if (r.counterparty_name) t[r.counterparty_name] = true;
+          data: rels
+        } = await sb.from("creator_relationships").select("id,counterparty_name").eq("creator_id", creator.id).eq("counterparty_type", "brand");
+        const t = {},
+          byId = {};
+        (rels || []).forEach(r => {
+          if (r.counterparty_name) {
+            t[r.counterparty_name] = true;
+            byId[r.id] = r.counterparty_name;
+          }
         });
         setTargets(t);
+        const {
+          data: touches
+        } = await sb.from("outreach_touches").select("relationship_id,subject,body,status,kind,created_at").eq("creator_id", creator.id).eq("kind", "pitch").order("created_at", {
+          ascending: false
+        });
+        const d = {};
+        (touches || []).forEach(tc => {
+          const bn = byId[tc.relationship_id];
+          if (bn && !d[bn]) d[bn] = {
+            subject: tc.subject,
+            body: tc.body,
+            status: tc.status
+          };
+        });
+        setDrafts(d);
       } catch (_) {}
     })();
   }, [creator]);
@@ -52055,6 +52077,53 @@ function CreatorPipeline({
       delete n[company];
       return n;
     });
+  };
+  const preparePitch = async company => {
+    if (!creator || !creator.id) return;
+    if (drafts[company]) {
+      setOpenDraft(company);
+      return;
+    }
+    if (draftBusy[company]) return;
+    setDraftBusy(p => Object.assign({}, p, {
+      [company]: true
+    }));
+    setOpenDraft(company);
+    const sb = cosGetSb();
+    try {
+      const {
+        data
+      } = await sb.functions.invoke("draft-pitch", {
+        body: {
+          brand_name: company
+        }
+      });
+      if (data && data.body) {
+        setDrafts(d => Object.assign({}, d, {
+          [company]: {
+            subject: data.subject,
+            body: data.body,
+            status: "draft"
+          }
+        }));
+        setTargets(t => Object.assign({}, t, {
+          [company]: true
+        }));
+      }
+    } catch (_) {}
+    setDraftBusy(p => {
+      const n = Object.assign({}, p);
+      delete n[company];
+      return n;
+    });
+    setTimeout(() => {
+      try {
+        window.scrollTo({
+          top: 0,
+          behavior: "smooth"
+        });
+      } catch (_) {}
+    }, 40);
   };
   const inr = n => "₹" + (n >= 100000 ? (n / 100000).toFixed(n % 100000 ? 1 : 0) + "L" : Number(n).toLocaleString("en-IN"));
   const ready = (brands || []).filter(b => b.has_contact).length;
@@ -52142,7 +52211,78 @@ function CreatorPipeline({
       textTransform: "uppercase",
       marginBottom: 10
     }
-  }, ready, " contact-ready \xB7 ", Object.keys(targets).length, " in your targets \xB7 ", brands.length, " brands"), /*#__PURE__*/React.createElement("div", {
+  }, ready, " contact-ready \xB7 ", Object.keys(targets).length, " in your targets \xB7 ", brands.length, " brands"), openDraft ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: COS.panel,
+      border: "1px solid rgba(26,222,212,.4)",
+      borderRadius: 14,
+      padding: 18,
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      letterSpacing: ".1em",
+      textTransform: "uppercase",
+      color: COS.ac,
+      fontWeight: 700
+    }
+  }, "Your pitch to ", openDraft), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setOpenDraft(""),
+    style: {
+      background: "transparent",
+      border: "none",
+      color: COS.mut,
+      cursor: "pointer",
+      fontSize: 16,
+      lineHeight: 1
+    }
+  }, "\xD7")), draftBusy[openDraft] ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: COS.mut,
+      fontSize: 13,
+      marginTop: 12
+    }
+  }, "Preparing your pitch, in your voice\u2026") : drafts[openDraft] ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      fontWeight: 700,
+      color: COS.ink
+    }
+  }, drafts[openDraft].subject), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: COS.mut,
+      marginTop: 8,
+      whiteSpace: "pre-wrap",
+      lineHeight: 1.55
+    }
+  }, drafts[openDraft].body), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12,
+      borderTop: "1px solid " + COS.line,
+      paddingTop: 10,
+      fontSize: 11.5,
+      color: COS.ac
+    }
+  }, "\u2726 We send this to the decision-maker and track the reply. You never touch a cold email.")) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: COS.mut,
+      fontSize: 13,
+      marginTop: 12
+    }
+  }, "Could not prepare this pitch right now.")) : null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))",
@@ -52212,31 +52352,44 @@ function CreatorPipeline({
       flexWrap: "wrap",
       marginTop: 11
     }
-  }, creator && creator.id ? targets[b.company] ? /*#__PURE__*/React.createElement("span", {
+  }, creator && creator.id ? /*#__PURE__*/React.createElement("button", {
+    onClick: () => preparePitch(b.company),
     style: {
-      fontFamily: COS.body,
-      fontSize: 11.5,
-      color: COS.ac,
-      border: "1px solid rgba(26,222,212,.4)",
-      borderRadius: 8,
-      padding: "7px 11px"
-    }
-  }, "\u2713 In your targets") : /*#__PURE__*/React.createElement("button", {
-    onClick: () => addTarget(b.company),
-    disabled: !!pending[b.company],
-    style: {
-      background: COS.ac,
-      color: "#06120f",
-      border: "none",
+      background: drafts[b.company] ? "transparent" : COS.amber,
+      color: drafts[b.company] ? COS.ac : "#0b0f17",
+      border: drafts[b.company] ? "1px solid rgba(26,222,212,.4)" : "none",
       borderRadius: 8,
       padding: "7px 11px",
       fontFamily: COS.body,
       fontSize: 11.5,
       fontWeight: 700,
       cursor: "pointer",
+      opacity: draftBusy[b.company] ? .6 : 1
+    }
+  }, draftBusy[b.company] ? "Preparing…" : drafts[b.company] ? "✓ Pitch ready" : "Prepare pitch") : null, creator && creator.id ? targets[b.company] ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: COS.body,
+      fontSize: 11.5,
+      color: COS.mut,
+      border: "1px solid " + COS.line2,
+      borderRadius: 8,
+      padding: "7px 11px"
+    }
+  }, "\u2713 Targeted") : /*#__PURE__*/React.createElement("button", {
+    onClick: () => addTarget(b.company),
+    disabled: !!pending[b.company],
+    style: {
+      background: "transparent",
+      border: "1px solid " + COS.line2,
+      color: COS.ink,
+      borderRadius: 8,
+      padding: "7px 11px",
+      fontFamily: COS.body,
+      fontSize: 11.5,
+      cursor: "pointer",
       opacity: pending[b.company] ? .6 : 1
     }
-  }, pending[b.company] ? "Adding…" : "+ Add to my targets") : null, /*#__PURE__*/React.createElement("button", {
+  }, pending[b.company] ? "Adding…" : "+ Target") : null, /*#__PURE__*/React.createElement("button", {
     onClick: onStudio,
     style: {
       background: "transparent",
@@ -52248,7 +52401,7 @@ function CreatorPipeline({
       fontSize: 11.5,
       cursor: "pointer"
     }
-  }, "\u2726 Make ideas")))))));
+  }, "\u2726 Ideas")))))));
 }
 
 // CreatorToday — the Home landing once DNA exists. Orients the creator with ONE clear next action
