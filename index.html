@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Creator OS Preview v6</title>
+<title>Creator OS Preview v7</title>
 <!-- RENDER-CRITICAL LIBRARIES: multi-CDN fallback chain (2026-05-29 P0 fix).
      These three (React, ReactDOM, Babel-standalone) MUST load or the app is a blank
      screen. They used to load ONLY from unpkg.com, which is blocked/throttled on many
@@ -52296,6 +52296,47 @@ function CreatorToday({
       cancel = true;
     };
   }, [creator]);
+  const [moves, setMoves] = React.useState(null);
+  const [movesBusy, setMovesBusy] = React.useState(false);
+  React.useEffect(() => {
+    const sb = cosGetSb();
+    if (!sb || !creator || !creator.id) {
+      setMoves([]);
+      return;
+    }
+    let cancel = false;
+    (async () => {
+      const load = async () => {
+        try {
+          const {
+            data
+          } = await sb.from("creator_actions").select("kind,title,rationale,score,inputs,status").eq("creator_id", creator.id).eq("status", "open").order("score", {
+            ascending: false
+          }).limit(6);
+          return data || [];
+        } catch (_) {
+          return [];
+        }
+      };
+      let m = await load();
+      if (!cancel && !m.length && creator.dna) {
+        setMovesBusy(true);
+        try {
+          await sb.functions.invoke("next-moves", {
+            body: {
+              creator_id: creator.id
+            }
+          });
+        } catch (_) {}
+        m = await load();
+        if (!cancel) setMovesBusy(false);
+      }
+      if (!cancel) setMoves(m);
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [creator]);
   if (showDna) return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowDna(false),
     style: {
@@ -52377,6 +52418,7 @@ function CreatorToday({
       cursor: "pointer"
     }
   }, label);
+  const kindColor = k => k === "pitch" || k === "outreach" ? COS.amber : COS.ac;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
@@ -52401,7 +52443,99 @@ function CreatorToday({
       maxWidth: 560,
       lineHeight: 1.55
     }
-  }, "Here is the one thing worth doing next, and everything waiting for you."), next ? /*#__PURE__*/React.createElement("div", {
+  }, "Your highest-impact moves this week, ranked and ready to act on."), moves === null || movesBusy ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "linear-gradient(150deg, rgba(26,222,212,.10), rgba(245,166,35,.05))",
+      border: "1px solid rgba(26,222,212,.3)",
+      borderRadius: 16,
+      padding: "20px 22px",
+      color: COS.mut
+    }
+  }, "Planning your best moves for the week\u2026") : moves && moves.length ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10.5,
+      letterSpacing: ".1em",
+      textTransform: "uppercase",
+      color: COS.ac,
+      fontWeight: 700,
+      marginBottom: 10
+    }
+  }, "Your moves this week"), moves.map((m, i) => {
+    const inp = m.inputs || {};
+    const top = i === 0;
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        background: top ? "linear-gradient(150deg, rgba(26,222,212,.12), rgba(245,166,35,.06))" : COS.panel,
+        border: "1px solid " + (top ? "rgba(26,222,212,.35)" : COS.line),
+        borderRadius: 14,
+        padding: "15px 18px",
+        marginBottom: 10,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 14,
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        minWidth: 240,
+        flex: 1
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 9.5,
+        fontWeight: 700,
+        textTransform: "uppercase",
+        letterSpacing: ".06em",
+        color: kindColor(m.kind),
+        border: "1px solid " + COS.line2,
+        borderRadius: 5,
+        padding: "2px 7px"
+      }
+    }, m.kind), inp.brand_name ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11.5,
+        color: COS.mut
+      }
+    }, inp.brand_name) : null), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: COS.disp,
+        fontWeight: 800,
+        fontSize: top ? 19 : 16,
+        margin: "8px 0 4px",
+        lineHeight: 1.25
+      }
+    }, m.title), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12.5,
+        color: COS.mut,
+        lineHeight: 1.5,
+        maxWidth: 520
+      }
+    }, m.rationale)), /*#__PURE__*/React.createElement("button", {
+      onClick: () => onTab(inp.action_target || "studio"),
+      style: {
+        background: top ? COS.ac : "transparent",
+        color: top ? "#06120f" : COS.ink,
+        border: top ? "none" : "1px solid " + COS.line2,
+        borderRadius: 10,
+        padding: "11px 16px",
+        fontFamily: COS.disp,
+        fontWeight: 800,
+        fontSize: 13,
+        cursor: "pointer",
+        whiteSpace: "nowrap"
+      }
+    }, inp.action_label || "Open", " \u2192"));
+  })) : next ? /*#__PURE__*/React.createElement("div", {
     style: {
       background: "linear-gradient(150deg, rgba(26,222,212,.12), rgba(245,166,35,.06))",
       border: "1px solid rgba(26,222,212,.35)",
